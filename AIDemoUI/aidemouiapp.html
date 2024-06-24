@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Image and Text Processing App</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            font-family: Arial, sans-serif;
+        }
+        #app {
+            width: 800px;
+            height: 600px;
+            position: relative;
+            border: 1px solid #ccc;
+            display: flex;
+            flex-direction: column;
+        }
+        #button-row {
+            background-color: #f0f0f0;
+            padding: 5px;
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 5px;
+        }
+        #content {
+            display: flex;
+            flex: 1;
+            position: relative;
+            overflow: hidden;
+        }
+        #main-image {
+            width: 450px;
+            background-color: #e6f2ff;
+            position: relative;
+            overflow: hidden;
+        }
+        #background-image {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+        }
+        #movable-window {
+            width: 300px;
+            height: 200px;
+            position: absolute;
+            top: 50px;
+            left: 50px;
+            background-color: rgba(204, 255, 204, 0.8);
+            border: 2px solid #00cc00;
+            box-sizing: border-box;
+            resize: both;
+            overflow: auto;
+        }
+        #foreground-image {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+        }
+        #editable-text-container {
+            position: absolute;
+            top: 70px;
+            left: 70px;
+            z-index: 10;
+            background-color: white;
+            border: 1px solid #999;
+            box-shadow: 2px 2px 5px rgba(0,0,0,0.2);
+        }
+        #editable-text-handle {
+            padding: 5px;
+            background-color: #f0f0f0;
+            cursor: move;
+            border-bottom: 1px solid #999;
+        }
+        #editable-text {
+            width: 200px;
+            height: 100px;
+            resize: both;
+            overflow: auto;
+            border: none;
+            padding: 5px;
+        }
+        #right-panel {
+            width: 350px;
+            padding: 10px;
+            box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
+        }
+        textarea {
+            width: 100%;
+            margin-bottom: 10px;
+            resize: none;
+        }
+        #input-text { flex: 3; }
+        #prompt-text { flex: 2; }
+        #debug-text { flex: 3; }
+        button {
+            padding: 5px 10px;
+            white-space: nowrap;
+        }
+        .toggle-btn, .image-select-btn {
+            background-color: #ccc;
+            color: #000;
+        }
+        .toggle-btn.active, .image-select-btn.active {
+            background-color: #4CAF50;
+            color: white;
+        }
+        .active-image {
+            border-color: #4CAF50 !important;
+        }
+    </style>
+</head>
+<body>
+    <div id="app">
+        <div id="button-row">
+            <button id="reset-btn">RESET</button>
+            <button id="start-btn">START</button>
+            <button id="upload-bg-btn">Upload Background</button>
+            <button id="upload-fg-btn">Upload Foreground</button>
+            <button id="bg-select-btn" class="image-select-btn active">BG</button>
+            <button id="fg-select-btn" class="image-select-btn">FG</button>
+            <button id="scale-fit-btn">Scale to Fit</button>
+            <button id="scale-fill-btn">Scale to Fill</button>
+            <button id="scale-original-btn">Original Size</button>
+            <button id="llm-toggle" class="toggle-btn">LLM: OFF</button>
+            <button id="header-toggle" class="toggle-btn active">Header: ON</button>
+            <button id="fg-toggle" class="toggle-btn active">FG: ON</button>
+        </div>
+        <div id="content">
+            <div id="main-image">
+                <img id="background-image" alt="Background" class="active-image">
+                <div id="movable-window">
+                    <img id="foreground-image" alt="Foreground">
+                </div>
+                <div id="editable-text-container">
+                    <div id="editable-text-handle">Drag here</div>
+                    <textarea id="editable-text" placeholder="Editable text field"></textarea>
+                </div>
+            </div>
+            <div id="right-panel">
+                <textarea id="input-text" placeholder="Input text field"></textarea>
+                <textarea id="prompt-text" placeholder="Prompt field"></textarea>
+                <textarea id="debug-text" placeholder="Debug output field"></textarea>
+            </div>
+        </div>
+    </div>
+    <script>
+        const movableWindow = document.getElementById('movable-window');
+        const editableTextContainer = document.getElementById('editable-text-container');
+        const editableTextHandle = document.getElementById('editable-text-handle');
+        const backgroundImage = document.getElementById('background-image');
+        const foregroundImage = document.getElementById('foreground-image');
+
+        let activeImage = 'background';
+        let foregroundVisible = true;
+
+        function makeElementDraggable(element, handle = element) {
+            let isDragging = false;
+            let dragOffsetX, dragOffsetY;
+
+            handle.addEventListener('mousedown', function(e) {
+                isDragging = true;
+                dragOffsetX = e.clientX - element.offsetLeft;
+                dragOffsetY = e.clientY - element.offsetTop;
+                e.preventDefault();
+            });
+
+            document.addEventListener('mousemove', function(e) {
+                if (isDragging) {
+                    let newX = e.clientX - dragOffsetX;
+                    let newY = e.clientY - dragOffsetY;
+                    
+                    newX = Math.max(0, Math.min(newX, 450 - element.offsetWidth));
+                    newY = Math.max(0, Math.min(newY, 550 - element.offsetHeight));
+                    
+                    element.style.left = newX + 'px';
+                    element.style.top = newY + 'px';
+                }
+            });
+
+            document.addEventListener('mouseup', function() {
+                isDragging = false;
+            });
+        }
+
+        makeElementDraggable(movableWindow);
+        makeElementDraggable(editableTextContainer, editableTextHandle);
+
+        function uploadImage(imgElement) {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = 'image/*';
+            input.onchange = function(e) {
+                const file = e.target.files[0];
+                const reader = new FileReader();
+                reader.onload = function(event) {
+                    imgElement.src = event.target.result;
+                };
+                reader.readAsDataURL(file);
+            };
+            input.click();
+        }
+
+        function setActiveImage(image) {
+            if (image === 'foreground' && !foregroundVisible) {
+                return;
+            }
+            activeImage = image;
+            document.getElementById('bg-select-btn').classList.toggle('active', image === 'background');
+            document.getElementById('fg-select-btn').classList.toggle('active', image === 'foreground');
+            backgroundImage.classList.toggle('active-image', image === 'background');
+            foregroundImage.classList.toggle('active-image', image === 'foreground');
+        }
+
+        function scaleImage(scaleType) {
+            const imgElement = activeImage === 'background' ? backgroundImage : foregroundImage;
+            imgElement.style.objectFit = scaleType;
+            if (scaleType === 'none') {
+                imgElement.style.width = 'auto';
+                imgElement.style.height = 'auto';
+                imgElement.style.maxWidth = '100%';
+                imgElement.style.maxHeight = '100%';
+            } else {
+                imgElement.style.width = '100%';
+                imgElement.style.height = '100%';
+            }
+        }
+
+        document.getElementById('bg-select-btn').addEventListener('click', function() {
+            setActiveImage('background');
+        });
+
+        document.getElementById('fg-select-btn').addEventListener('click', function() {
+            if (foregroundVisible) {
+                setActiveImage('foreground');
+            }
+        });
+
+        document.getElementById('scale-fit-btn').addEventListener('click', function() {
+            scaleImage('contain');
+        });
+
+        document.getElementById('scale-fill-btn').addEventListener('click', function() {
+            scaleImage('cover');
+        });
+
+        document.getElementById('scale-original-btn').addEventListener('click', function() {
+            scaleImage('none');
+        });
+
+        let llmActive = false;
+        let headerVisible = true;
+
+        document.getElementById('llm-toggle').addEventListener('click', function() {
+            llmActive = !llmActive;
+            this.textContent = llmActive ? "LLM: ON" : "LLM: OFF";
+            this.classList.toggle('active');
+        });
+
+        document.getElementById('header-toggle').addEventListener('click', function() {
+            headerVisible = !headerVisible;
+            this.textContent = headerVisible ? "Header: ON" : "Header: OFF";
+            this.classList.toggle('active');
+            document.getElementById('editable-text-handle').style.display = headerVisible ? 'block' : 'none';
+        });
+
+        document.getElementById('fg-toggle').addEventListener('click', function() {
+            foregroundVisible = !foregroundVisible;
+            this.textContent = foregroundVisible ? "FG: ON" : "FG: OFF";
+            this.classList.toggle('active');
+            movableWindow.style.display = foregroundVisible ? 'block' : 'none';
+            if (!foregroundVisible && activeImage === 'foreground') {
+                setActiveImage('background');
+            }
+        });
+
+        async function callLLM(prompt, input) {
+            console.log("Calling LLM API with prompt:", prompt, "and input:", input);
+            return `LLM Response: Processed ${input.length} characters with prompt "${prompt}"\nThis is a mock response from the LLM API.`;
+        }
+
+        document.getElementById('start-btn').addEventListener('click', async function() {
+            if (llmActive) {
+                const promptText = document.getElementById('prompt-text').value;
+                const inputText = document.getElementById('input-text').value;
+                const llmResponse = await callLLM(promptText, inputText);
+                document.getElementById('debug-text').value = llmResponse;
+                const firstLine = llmResponse.split('\n')[0];
+                document.getElementById('editable-text').value = firstLine;
+            } else {
+                document.getElementById('editable-text').value = document.getElementById('input-text').value;
+            }
+        });
+
+        document.getElementById('reset-btn').addEventListener('click', function() {
+            document.getElementById('editable-text').value = '';
+            document.getElementById('input-text').value = '';
+            document.getElementById('debug-text').value = '';
+        });
+
+        document.getElementById('upload-bg-btn').addEventListener('click', function() {
+            uploadImage(backgroundImage);
+        });
+
+        document.getElementById('upload-fg-btn').addEventListener('click', function() {
+            uploadImage(foregroundImage);
+        });
+    </script>
+</body>
+</html>
